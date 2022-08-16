@@ -10,7 +10,7 @@ ndp = np.float64
 class FisherEstimation:
     def __init__(self, fmin=7.5e9, fmax=3.e12, fstep=15.e9, \
                  duration=86.4, bandpass=True, fsky=0.7, mult=1., \
-                 priors={'alps':0.1, 'As':0.1}, drop=0, doCO=False):
+                 priors={'alps':0.1, 'As':0.1}, drop=0, doCO=False, doSOFTS=False, SOFTS_sensitivity_file=''):
         self.fmin = fmin
         self.fmax = fmax
         self.bandpass_step = 1.e8
@@ -21,6 +21,8 @@ class FisherEstimation:
         self.mult = mult
         self.priors = priors
         self.drop = drop
+        self.doSOFTS = doSOFTS
+        self.SOFTS_sensitivity_file = SOFTS_sensitivity_file
 
         self.setup()
         self.set_signals()
@@ -32,8 +34,12 @@ class FisherEstimation:
         return
 
     def setup(self):
-        self.set_frequencies()
-        self.noise = self.pixie_sensitivity()
+        if self.doSOFTS:
+                self.set_SOFTS_frequencies()
+                self.noise = self.SOFTS_sensitivity()
+        else:
+            self.set_frequencies()
+            self.noise = self.pixie_sensitivity()
         return
 
     def run_fisher_calculation(self):
@@ -91,8 +97,33 @@ class FisherEstimation:
         #self.windowfnc = np.sinc((np.arange(binstep)-(binstep/2-1))/float(binstep))
         return freqs, centerfreqs, binstep
 
+    def set_SOFTS_frequencies(self):
+        if self.bandpass:
+            print('no bandpass action in SOFTS yet. Exiting program...bye!')
+            sys.exit()
+        else:
+            sdata = np.loadtxt('templates/'+self.SOFTS_sensitivity_file, dtype=ndp)
+            fs = sdata[:, 0] * 1e9
+            self.center_frequencies = fs
+        return
+
+
+
     def pixie_sensitivity(self):
         sdata = np.loadtxt('templates/Sensitivities.dat', dtype=ndp)
+        fs = sdata[:, 0] * 1e9
+        sens = sdata[:, 1]
+        template = interpolate.interp1d(np.log10(fs), np.log10(sens), bounds_error=False, fill_value="extrapolate")
+        skysr = 4. * np.pi * (180. / np.pi) ** 2 * self.fsky
+        if self.bandpass:
+            N = len(self.band_frequencies)
+            noise = 10. ** template(np.log10(self.band_frequencies)) / np.sqrt(skysr) * np.sqrt(15. / self.duration) * self.mult * 1.e26
+            return (noise.reshape(( N / self.binstep, self.binstep)).mean(axis=1)).astype(ndp)
+        else:
+            return (10. ** template(np.log10(self.center_frequencies)) / np.sqrt(skysr) * np.sqrt(15. / self.duration) * self.mult * 1.e26).astype(ndp)
+
+    def SOFTS_sensitivity(self):
+        sdata = np.loadtxt('templates/'+self.SOFTS_sensitivity_file, dtype=ndp)
         fs = sdata[:, 0] * 1e9
         sens = sdata[:, 1]
         template = interpolate.interp1d(np.log10(fs), np.log10(sens), bounds_error=False, fill_value="extrapolate")
